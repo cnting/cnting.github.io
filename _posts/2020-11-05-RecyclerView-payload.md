@@ -54,6 +54,8 @@ void triggerUpdateProcessor() {
 }
 ```
 
+上面两个方法共通点是都会走`preProcess()`（见流程3）和 三个step（见流程4）
+
 ##### 3. AdpaterHelper#preProcess
 
 ```java
@@ -84,7 +86,7 @@ void viewRangeUpdate(int positionStart, int itemCount, Object payload) {
 }
 ```
 
-##### 5. 重走三个step
+##### 4. 重走三个step
 
 在流程2最后会重走三个step，先来说下它们的区别
 
@@ -94,7 +96,9 @@ void viewRangeUpdate(int positionStart, int itemCount, Object payload) {
 | `dispatchLayoutStep2` | 根据最终状态执行布局                                         |
 | `dispatchLayoutStep3` | 执行动画                                                     |
 
-##### 6. RecyclerView#dispatchLayoutStep1
+这里我们只分析局部刷新动画，所以只看`dispatchLayoutStep1()`和`dispatchLayoutStep3()`
+
+##### 5. RecyclerView#dispatchLayoutStep1
 
 ```java
 private void dispatchLayoutStep1() {
@@ -127,7 +131,7 @@ private void dispatchLayoutStep1() {
   }
   if (mState.mRunPredictiveAnimations) {
     ...
-    //如果有需要，执行预布局，此时mInPreLayout=true，见流程7
+    //如果有需要，执行预布局，此时mInPreLayout=true，见流程6
     mLayout.onLayoutChildren(mRecycler, mState);
     ...
   }  
@@ -135,17 +139,17 @@ private void dispatchLayoutStep1() {
 }
 ```
 
-##### 7. LinearLayoutManager#onLayoutChildren
+##### 6. LinearLayoutManager#onLayoutChildren
 
 ```java
 @Override
 public void onLayoutChildren(RecyclerView.Recycler recycler, RecyclerView.State state) {
   ...
-  //回收当前页面上的ViewHolder，见流程8
+  //回收当前页面上的ViewHolder，见流程7
   detachAndScrapAttachedViews(recycler);
   ...
   if (mAnchorInfo.mLayoutFromEnd) {
-    //进行布局，见流程11
+    //进行布局，见流程10
     fill(recycler, mLayoutState, state, false);
     ...
   }
@@ -166,7 +170,7 @@ public void onLayoutChildren(RecyclerView.Recycler recycler, RecyclerView.State 
 
 
 
-##### 8. LayoutManager#detachAndScrapAttachedViews
+##### 7. LayoutManager#detachAndScrapAttachedViews
 
 ```java
 public void detachAndScrapAttachedViews(Recycler recycler) {
@@ -192,19 +196,19 @@ private void scrapOrRecycleView(Recycler recycler, int index, View view) {
     recycler.recycleViewHolderInternal(viewHolder);
   } else {
     detachViewAt(index);
-    //将ViewHolder缓存到 mAttachedScrap 或 mChangedScrap，见流程9
+    //将ViewHolder缓存到 mAttachedScrap 或 mChangedScrap，见流程8
     recycler.scrapView(view);
     mRecyclerView.mViewInfoStore.onViewDetached(viewHolder);
   }
 }
 ```
 
-##### 9. Recycler#scrapView
+##### 8. Recycler#scrapView
 
 ```java
 void scrapView(View view) {
   final ViewHolder holder = getChildViewHolderInt(view);
-  //canReuseUpdatedViewHolder()这里是关键，见流程10
+  //canReuseUpdatedViewHolder()这里是关键，见流程9
   if (holder.hasAnyOfTheFlags(ViewHolder.FLAG_REMOVED | ViewHolder.FLAG_INVALID)
       || !holder.isUpdated() || canReuseUpdatedViewHolder(holder)) {
     ...
@@ -216,7 +220,7 @@ void scrapView(View view) {
 }
 ```
 
-##### 10. RecyclerView#canReuseUpdatedViewHolder
+##### 9. RecyclerView#canReuseUpdatedViewHolder
 
 ```java
 boolean canReuseUpdatedViewHolder(ViewHolder viewHolder) {
@@ -236,7 +240,7 @@ public boolean canReuseUpdatedViewHolder(@NonNull ViewHolder viewHolder,
 
 可以看到，**当`payload`不为空时，是缓存到`mAttachedScrap`中的**，这是重点
 
-##### 11. LinearLayoutManager#fill
+##### 10. LinearLayoutManager#fill
 
 在填充view时，会从Recycler中获取ViewHolder，最后会走到`tryGetViewHolderForPositionByDeadline()`
 
@@ -294,9 +298,9 @@ ViewHolder tryGetViewHolderForPositionByDeadline(int position,
 }
 ```
 
-从流程10里得出`ViewHolder`是存在`mAttachedScrap`中的，所以这边从`getScrapOrHiddenOrCachedHolderForPosition()`中**取出的ViewHolder和之前存放的ViewHolder是同一个**。这是重点
+从流程9里得出`ViewHolder`是存在`mAttachedScrap`中的，所以这边从`getScrapOrHiddenOrCachedHolderForPosition()`中**取出的ViewHolder和之前存放的ViewHolder是同一个**。这是重点
 
-##### 12. RecyclerView#dispatchLayoutStep3
+##### 11. RecyclerView#dispatchLayoutStep3
 
 ```java
 private void dispatchLayoutStep3() {
@@ -333,7 +337,7 @@ private void animateChange(@NonNull ViewHolder oldHolder, @NonNull ViewHolder ne
   if (oldHolderDisappearing) {
     addAnimatingView(oldHolder);
   }
-  //关键点，从流程11知道我们拿到的ViewHolder是同一个，所以不会调用 addAnimatingView()
+  //关键点，从流程10知道我们拿到的ViewHolder是同一个，所以不会调用 addAnimatingView()
   if (oldHolder != newHolder) {
     if (newHolderDisappearing) {
       addAnimatingView(newHolder);
@@ -345,14 +349,14 @@ private void animateChange(@NonNull ViewHolder oldHolder, @NonNull ViewHolder ne
     newHolder.setIsRecyclable(false);
     newHolder.mShadowingHolder = oldHolder;
   }
-  //关键点，如果这个方法返回false,则不执行动画，见流程13
+  //关键点，如果这个方法返回false,则不执行动画，见流程12
   if (mItemAnimator.animateChange(oldHolder, newHolder, preInfo, postInfo)) {
     postAnimationRunner();
   }
 }
 ```
 
-##### 13. DefaultItemAnimator#animateChange
+##### 12. DefaultItemAnimator#animateChange
 
 ```java
 @Override
@@ -385,7 +389,7 @@ public boolean animateMove(final ViewHolder holder, int fromX, int fromY,
 
 因为`animateChange()`返回false，导致后面动画流程不再执行，所以不会有闪的效果
 
-##### 14. 再次梳理
+##### 13. 再次梳理
 
 1. 调用`Adapter.notifyItemChanged(position,payload)`时，会将`payload`保存
 2. 在`LayoutManager`布局时，会先将页面上的`ViewHolder`都先回收，因为`payload`不为空，所以会回收到`mAttachedScrap`中
